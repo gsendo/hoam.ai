@@ -1,80 +1,79 @@
 import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
-import path from 'path';
 import mongoose from 'mongoose';
 import http from 'http';
 import { Server } from 'socket.io';
-import { fileURLToPath } from 'url';
+import AWS from 'aws-sdk';
+import multerS3 from 'multer-s3';
+import path from 'path';
 import fs from 'fs';
-
-// Setup __dirname manually for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// MongoDB connection
-mongoose.connect('mongodb+srv://hoamuser:test@cluster0.48rowfg.mongodb.net/hoam?retryWrites=true&w=majority&appName=Cluster0', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-})
-.then(() => console.log('Connected to MongoDB Atlas!'))
-.catch(err => console.error('MongoDB Atlas connection error:', err));
+// Increase body size limit
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// User schema
-const userSchema = new mongoose.Schema({
-    name: String,
-    email: { type: String, unique: true },
-    address: String,
-    password: String
-});
-
-const User = mongoose.model('User', userSchema);
-
-// Multer config
-const storage = multer.diskStorage({
-    destination: 'uploads/',
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 25 * 1024 * 1024 } // 25 MB limit
-});
-
-// Middleware
+// Enable CORS
 app.use(cors());
-app.use(express.static('public')); 
 
-// Pages
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Static files
+app.use(express.static('public'));
+
+// MongoDB
+mongoose.connect('mongodb+srv://hoamuser:test@cluster0.48rowfg.mongodb.net/hoam?retryWrites=true&w=majority&appName=Cluster0')
+.then(() => console.log('Connected to MongoDB Atlas!'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+// AWS S3 config
+const s3 = new AWS.S3({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,   // ← These must be set in your environment (.env or Vercel dashboard)
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.AWS_REGION
 });
 
-// Upload
-app.post('/upload', upload.single('document'), (req, res) => {
-    console.log('Uploaded:', req.file);
-    res.send('Success');
-});
-
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
-// List uploaded files
-app.get('/api/files', (req, res) => {
-    fs.readdir('uploads', (err, files) => {
-        if (err) {
-            console.error('Failed to list uploaded files:', err);
-            return res.status(500).json({ error: 'Failed to list files' });
+// Multer + S3 storage setup
+const upload = multer({
+    storage: multerS3({
+        s3: s3,
+        bucket: process.env.AWS_BUCKET_NAME,
+        acl: 'public-read', // So files are public by default; adjust if needed
+        metadata: function (req, file, cb) {
+            cb(null, { fieldName: file.fieldname });
+        },
+        key: function (req, file, cb) {
+            cb(null, Date.now().toString() + '-' + file.originalname);
         }
-        const formattedFiles = files.map(filename => ({ filename }));
-        res.json(formattedFiles);
-    });
+    }),
+    limits: { fileSize: 50 * 1024 * 1024 } // 50 MB limit
+});
+
+// Upload endpoint
+app.post('/upload', upload.single('document'), (req, res) => {
+    console.log('Uploaded to S3:', req.file.location);  // log file URL
+    res.send({ url: req.file.location });
+});
+
+// List files endpoint
+app.get('/api/files', async (req, res) => {
+    try {
+        const data = await s3.listObjectsV2({
+            Bucket: process.env.AWS_BUCKET_NAME
+        }).promise();
+
+        const files = data.Contents.map(file => ({
+            filename: file.Key,
+            url: `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${file.Key}`
+        }));
+
+        res.json(files);
+    } catch (err) {
+        console.error('Failed to list files:', err);
+        res.status(500).json({ error: 'Failed to list files' });
+    }
 });
 
 // Register
