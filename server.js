@@ -41,7 +41,11 @@ const storage = multer.diskStorage({
         cb(null, Date.now() + '-' + file.originalname);
     }
 });
-const upload = multer({ storage });
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 } // 25 MB limit
+});
 
 // Middleware
 app.use(cors());
