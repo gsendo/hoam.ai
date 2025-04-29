@@ -37,7 +37,6 @@ async function handleUpload(event) {
     });
 
     if (response.ok) {
-      alert('Upload successful!');
       loadFileList(); // ← Call this to update list immediately
     } else {
       alert('Upload failed.');
