@@ -50,8 +50,6 @@ const upload = multer({
 // Middleware
 app.use(cors());
 app.use(express.static('public')); 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
 
 // Pages
 app.get('/', (req, res) => {
@@ -63,6 +61,9 @@ app.post('/upload', upload.single('document'), (req, res) => {
     console.log('Uploaded:', req.file);
     res.send('Success');
 });
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // List uploaded files
 app.get('/api/files', (req, res) => {
